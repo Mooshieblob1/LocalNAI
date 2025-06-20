@@ -48,8 +48,8 @@ class MainWindow(QMainWindow):
         self.generation_thread = None
         
         self.setWindowTitle("NovelAI Local - Modern Interface")
-        self.setMinimumSize(1200, 700)  # Reduced minimum height
-        self.resize(1400, 800)  # Reduced default height
+        self.setMinimumSize(1440, 840)  # 20% bigger than 1200x700
+        self.resize(1680, 960)  # 20% bigger than 1400x800
         
         # Apply modern styling with more compact spacing
         self.setStyleSheet(MAIN_STYLE + """
@@ -83,10 +83,10 @@ class MainWindow(QMainWindow):
         central_widget.layout().addWidget(splitter)
         central_widget.layout().setContentsMargins(8, 8, 8, 8)  # Reduced margins
         
-        # Left panel (controls)
+        # Left panel (controls) - give it more room
         left_panel = self.create_control_panel()
-        left_panel.setMaximumWidth(420)  # Slightly smaller
-        left_panel.setMinimumWidth(380)
+        left_panel.setMaximumWidth(500)  # Increased from 420
+        left_panel.setMinimumWidth(450)  # Increased from 380
         
         # Right panel (image display)
         right_panel = self.create_image_panel()
@@ -130,10 +130,11 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)  # Compact spacing
         layout.setContentsMargins(8, 12, 8, 8)
         
-        # Prompt input - more compact
+        # Prompt input - REMOVED height constraints to allow dynamic sizing
         self.prompt_input = TagCompleteWidget()
-        self.prompt_input.setMinimumHeight(60)  # Reduced height
-        self.prompt_input.setMaximumHeight(80)
+        # Remove these lines to allow dynamic height:
+        # self.prompt_input.setMinimumHeight(60)  
+        # self.prompt_input.setMaximumHeight(80)
         layout.addWidget(self.prompt_input)
         
         # Quality toggle - inline with custom checkbox
@@ -158,8 +159,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(neg_label)
         
         self.negative_prompt_input = TagCompleteWidget()
-        self.negative_prompt_input.setMinimumHeight(40)  # Reduced height
-        self.negative_prompt_input.setMaximumHeight(60)
+        # Remove these lines to allow dynamic height:
+        # self.negative_prompt_input.setMinimumHeight(40)  
+        # self.negative_prompt_input.setMaximumHeight(60)
         layout.addWidget(self.negative_prompt_input)
         
         # Negative quality toggle with custom checkbox

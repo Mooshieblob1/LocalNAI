@@ -1,13 +1,13 @@
-from PyQt6.QtWidgets import (QTextEdit, QListWidget, QListWidgetItem, QVBoxLayout, 
-                             QWidget, QFrame)
+from PyQt6.QtWidgets import (QTextEdit, QListWidget, QListWidgetItem, QHBoxLayout, 
+                             QWidget, QFrame, QSizePolicy)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QTextCursor, QKeyEvent, QColor
+from PyQt6.QtGui import QTextCursor, QKeyEvent, QColor, QFontMetrics
 from utils.tag_manager import TagManager
 import re
 import math
 
 class TagCompleteWidget(QWidget):
-    """Widget that contains both text edit and embedded suggestions"""
+    """Widget that contains text edit on the left and suggestions on the right"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -20,27 +20,128 @@ class TagCompleteWidget(QWidget):
         self.search_timer.timeout.connect(self.update_suggestions)
         
     def setup_ui(self):
-        layout = QVBoxLayout(self)
+        # Use horizontal layout to place text edit and suggestions side by side
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(8)
         
-        # Text edit with weighting support
+        # Text edit with weighting support (left side)
         self.text_edit = WeightedTextEdit()
         self.text_edit.textChanged.connect(self.on_text_changed)
-        layout.addWidget(self.text_edit)
+        # Connect the text edit's key events to our handler
+        self.text_edit.keyPressEvent = self.handle_text_edit_key_press
+        layout.addWidget(self.text_edit, stretch=3)  # Give text edit more space
         
-        # Suggestions list (embedded below text edit)
+        # Suggestions list (right side) - MADE SMALLER
         self.suggestions_list = QListWidget()
-        self.suggestions_list.setMaximumHeight(120)
+        self.suggestions_list.setMaximumWidth(220)  # Reduced from 350 to 220
+        self.suggestions_list.setMinimumWidth(220)
         self.suggestions_list.setFrameStyle(QFrame.Shape.Box)
         self.suggestions_list.itemClicked.connect(self.insert_completion)
         self.suggestions_list.hide()  # Hidden initially
-        layout.addWidget(self.suggestions_list)
+        layout.addWidget(self.suggestions_list, stretch=1)  # Less stretch than text edit
+        
+        # Style the suggestions
+        self.suggestions_list.setStyleSheet("""
+            QListWidget {
+                background-color: #2d2d2d;
+                border: 1px solid #555;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QListWidget::item {
+                padding: 6px 8px;
+                border-bottom: 1px solid #333;
+            }
+            QListWidget::item:selected {
+                background-color: #0078d4;
+                color: white;
+            }
+            QListWidget::item:hover {
+                background-color: #404040;
+            }
+        """)
+
+    def handle_text_edit_key_press(self, event):
+        """Handle key presses from the text edit, prioritizing suggestions navigation"""
+        # If suggestions are visible, handle navigation first
+        if self.suggestions_list.isVisible():
+            if event.key() == Qt.Key.Key_Down:
+                current_row = self.suggestions_list.currentRow()
+                if current_row < self.suggestions_list.count() - 1:
+                    self.suggestions_list.setCurrentRow(current_row + 1)
+                else:
+                    self.suggestions_list.setCurrentRow(0)
+                return
+                
+            elif event.key() == Qt.Key.Key_Up:
+                current_row = self.suggestions_list.currentRow()
+                if current_row > 0:
+                    self.suggestions_list.setCurrentRow(current_row - 1)
+                else:
+                    self.suggestions_list.setCurrentRow(self.suggestions_list.count() - 1)
+                return
+                
+            elif event.key() in [Qt.Key.Key_Return, Qt.Key.Key_Enter]:
+                current_item = self.suggestions_list.currentItem()
+                if current_item:
+                    self.insert_completion(current_item)
+                return
+                
+            elif event.key() == Qt.Key.Key_Escape:
+                self.hide_suggestions()
+                return
+                
+            # Hide suggestions on comma (tag separator)
+            elif event.key() == Qt.Key.Key_Comma:
+                self.hide_suggestions()
+        
+        # For weighting when suggestions are NOT visible, or Ctrl is held
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_Up:
+                self.text_edit.adjust_weight(0.1)  # Increase weight
+                return
+            elif event.key() == Qt.Key.Key_Down:
+                self.text_edit.adjust_weight(-0.1)  # Decrease weight
+                return
+        
+        # Default text edit handling for all other keys
+        QTextEdit.keyPressEvent(self.text_edit, event)
         
     def on_text_changed(self):
         """Called when text changes - start search timer"""
         self.search_timer.stop()
-        self.search_timer.start(200)  # 200ms delay
+        self.search_timer.start(150)
+        
+    def truncate_text_with_ellipsis(self, text, max_width):
+        """Truncate text to fit within max_width pixels, adding ellipsis if needed"""
+        font_metrics = QFontMetrics(self.suggestions_list.font())
+        
+        if font_metrics.horizontalAdvance(text) <= max_width:
+            return text
+        
+        # Binary search to find the maximum length that fits
+        ellipsis = "..."
+        ellipsis_width = font_metrics.horizontalAdvance(ellipsis)
+        available_width = max_width - ellipsis_width
+        
+        # Start with a reasonable estimate
+        estimated_chars = int(len(text) * available_width / font_metrics.horizontalAdvance(text))
+        
+        # Fine-tune with binary search
+        left, right = 0, estimated_chars
+        result = ""
+        
+        while left <= right:
+            mid = (left + right) // 2
+            test_text = text[:mid]
+            if font_metrics.horizontalAdvance(test_text) <= available_width:
+                result = test_text
+                left = mid + 1
+            else:
+                right = mid - 1
+        
+        return result + ellipsis if result else ellipsis
         
     def update_suggestions(self):
         """Update tag suggestions based on current word being typed"""
@@ -48,26 +149,43 @@ class TagCompleteWidget(QWidget):
         current_word = self.get_current_word(cursor)
         
         if len(current_word) < 1:
-            self.suggestions_list.hide()
+            self.hide_suggestions()
             return
-            
-        # Search for matching tags
-        matches = self.tag_manager.search_tags(current_word, limit=8)
+        
+        # Search for matching tags first
+        matches = self.tag_manager.search_tags(current_word, limit=20)  # More suggestions since we have more space
         
         if not matches:
-            self.suggestions_list.hide()
+            self.hide_suggestions()
             return
-            
+        
+        # Check if current word exactly matches the first suggestion (complete tag typed)
+        if matches and len(matches) > 0:
+            first_match = self.format_tag_for_insertion(matches[0][0])
+            # Hide if it's an EXACT match and the word looks complete
+            if current_word.lower() == first_match.lower() and len(current_word) > 3:
+                # Check if we're at the end of a word (followed by comma, space, or end of text)
+                text = self.text_edit.toPlainText()
+                pos = cursor.position()
+                if pos >= len(text) or text[pos] in [',', ' ', '\n']:
+                    self.hide_suggestions()
+                    return
+        
         # Populate suggestions
         self.suggestions_list.clear()
+        available_width = 200  # Account for padding in the 220px wide widget
+        
         for tag_name, category, count in matches:
             category_name = self.tag_manager.get_category_name(category)
             
-            # Format tag for display - keep original for display
+            # Format tag for display
             display_tag = self.format_tag_for_insertion(tag_name)
             item_text = f"{display_tag} ({category_name}, {count:,})"
             
-            item = QListWidgetItem(item_text)
+            # Truncate with ellipsis if too long
+            truncated_text = self.truncate_text_with_ellipsis(item_text, available_width)
+            
+            item = QListWidgetItem(truncated_text)
             item.setData(Qt.ItemDataRole.UserRole, tag_name)  # Store original tag name
             
             # Color code by category
@@ -80,9 +198,28 @@ class TagCompleteWidget(QWidget):
                 
             self.suggestions_list.addItem(item)
         
-        # Show the suggestions
-        self.suggestions_list.show()
+        # Show the suggestions and select first item
+        self.show_suggestions()
         
+    def show_suggestions(self):
+        """Show suggestions list and match text edit height"""
+        if not self.suggestions_list.isVisible():
+            # Match the height of the suggestions to the text edit
+            text_edit_height = self.text_edit.height()
+            self.suggestions_list.setMinimumHeight(text_edit_height)
+            self.suggestions_list.setMaximumHeight(text_edit_height)
+            
+            self.suggestions_list.show()
+            self.suggestions_list.setCurrentRow(0)  # Auto-select first suggestion
+                
+    def hide_suggestions(self):
+        """Hide suggestions list and reset text edit height constraints"""
+        if self.suggestions_list.isVisible():
+            self.suggestions_list.hide()
+            # Reset height constraints to allow text edit to resize freely
+            self.suggestions_list.setMinimumHeight(0)
+            self.suggestions_list.setMaximumHeight(16777215)  # Qt's maximum
+                
     def format_tag_for_insertion(self, tag_name):
         """Format tag by removing underscores and escaping parentheses"""
         # Remove underscores
@@ -134,7 +271,7 @@ class TagCompleteWidget(QWidget):
         while start < len(text) and text[start] in [' ', '\t']:
             start += 1
             
-        # Select current word and replace
+        # Select current word and replace it
         cursor.setPosition(start)
         cursor.setPosition(pos, QTextCursor.MoveMode.KeepAnchor)
         cursor.insertText(formatted_tag)  # Insert formatted tag
@@ -144,40 +281,8 @@ class TagCompleteWidget(QWidget):
         if cursor.position() < len(current_text) or not current_text.endswith(formatted_tag):
             cursor.insertText(', ')
         
-        self.suggestions_list.hide()
+        self.hide_suggestions()
         self.text_edit.setFocus()
-        
-    def keyPressEvent(self, event):
-        """Handle key presses for suggestions navigation"""
-        if self.suggestions_list.isVisible():
-            if event.key() == Qt.Key.Key_Down:
-                current_row = self.suggestions_list.currentRow()
-                if current_row < self.suggestions_list.count() - 1:
-                    self.suggestions_list.setCurrentRow(current_row + 1)
-                else:
-                    self.suggestions_list.setCurrentRow(0)
-                return
-                
-            elif event.key() == Qt.Key.Key_Up:
-                current_row = self.suggestions_list.currentRow()
-                if current_row > 0:
-                    self.suggestions_list.setCurrentRow(current_row - 1)
-                else:
-                    self.suggestions_list.setCurrentRow(self.suggestions_list.count() - 1)
-                return
-                
-            elif event.key() in [Qt.Key.Key_Return, Qt.Key.Key_Enter]:
-                current_item = self.suggestions_list.currentItem()
-                if current_item:
-                    self.insert_completion(current_item)
-                return
-                
-            elif event.key() == Qt.Key.Key_Escape:
-                self.suggestions_list.hide()
-                return
-                
-        # Pass to text edit
-        self.text_edit.keyPressEvent(event)
         
     # Proxy methods to make it work like a QTextEdit
     def toPlainText(self):
@@ -196,19 +301,6 @@ class TagCompleteWidget(QWidget):
 class WeightedTextEdit(QTextEdit):
     """QTextEdit with tag weighting support via Ctrl+Up/Down using weight::tag:: format"""
     
-    def keyPressEvent(self, event):
-        # Check for Ctrl+Up/Down for weighting
-        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            if event.key() == Qt.Key.Key_Up:
-                self.adjust_weight(0.1)  # Increase weight
-                return
-            elif event.key() == Qt.Key.Key_Down:
-                self.adjust_weight(-0.1)  # Decrease weight
-                return
-                
-        # Default handling
-        super().keyPressEvent(event)
-        
     def adjust_weight(self, delta):
         """Adjust weight of selected text or current tag"""
         cursor = self.textCursor()
