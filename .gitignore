@@ -48,3 +48,4 @@ generated_images/
 *.log
 logs/
 
+.env
