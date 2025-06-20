@@ -13,9 +13,3 @@ A modern local client for NovelAI image generation with advanced features and in
 - 🔄 **Opus Limits** - Built-in resolution limits for Opus subscriptions to prevent errors.
 - 💾 **Metadata Support** - Full EXIF data preservation for generated images.
 - ⚡ **Fast & Lightweight** - Built for performance.
-
-## Installation
-
-Install LocalNAI using `pip` or `uv`.
-
-### pip
