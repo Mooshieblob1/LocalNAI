@@ -50,8 +50,7 @@ The application automatically loads tag data from `tags/tags.csv` for autocomple
 ### Tag Weighting
 - Highlight any tag and use **Ctrl+↑** to increase weight by 0.1
 - Use **Ctrl+↓** to decrease weight by 0.1
-- Displays as: `(masterpiece:1.2)` 
-- Sends to API as: `1.2::masterpiece::`
+- Displays as: `1.2::masterpiece::`
 
 ### Tag Autocomplete
 - Start typing any tag name
