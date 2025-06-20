@@ -38,6 +38,7 @@ Thumbs.db
 # Config files (may contain API keys)
 config.json
 *.key
+.env
 
 # Generated images
 output/
@@ -46,3 +47,4 @@ generated_images/
 # Logs
 *.log
 logs/
+
